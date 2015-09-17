@@ -107,11 +107,11 @@ int client()
 		exit(-1);
 	}
 
-	ret = mtcp_setsock_nonblock(mctx, listen_id);
+	/*ret = mtcp_setsock_nonblock(mctx, listen_id);
 	if (ret < 0) {
 		printf("Failed to set socket in nonblocking mode.\n");
 		exit(-1);
-	}
+	}*/
 
 	daddr = inet_addr(host);
 	dport = htons(s_port);
