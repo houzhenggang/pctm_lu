@@ -81,7 +81,7 @@ int client()
 	int s_len;
 	char s_buf[SNDBUF_SIZE+2];
 	
-	int sendi = 0, sendmax = 2;
+	int sendi = 0, sendmax = 20;
 	int core_nums;
 
 	printf("client start...\n");

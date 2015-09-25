@@ -769,7 +769,7 @@ Handle_TCP_ST_SYN_SENT (mtcp_manager_t mtcp, uint32_t cur_ts,
 				AddtoTimeoutList(mtcp, cur_stream);
 			
 			//lmhtq:connection test
-			printf("lmhtq:establised!\n");
+			printf("client establised!\n");
 			printf("reserved bits: %d\n", tcph->res1);
 			//exit(0);
 		} else {
@@ -835,7 +835,10 @@ Handle_TCP_ST_SYN_RCVD (mtcp_manager_t mtcp, uint32_t cur_ts,
 			AddEpollEvent(mtcp->ep, 
 					MTCP_EVENT_QUEUE, listener->socket, MTCP_EPOLLIN);
 		}
-
+		/* lmhtq: redundant(3 lines) */
+		printf("server establised!\n");
+		printf("reserved bits:%d", cur_stream->stream_method);
+		//exit(0);
 	} else {
 		TRACE_DBG("Stream %d (TCP_ST_SYN_RCVD): No ACK.\n", 
 				cur_stream->id);
