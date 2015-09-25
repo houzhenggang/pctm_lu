@@ -689,6 +689,13 @@ Handle_TCP_ST_LISTEN (mtcp_manager_t mtcp, uint32_t cur_ts,
 	if (tcph->syn) {
 		cur_stream->state = TCP_ST_SYN_RCVD;
 		cur_stream->rcv_nxt++;
+		
+		/* lmhtq: redundant (4 lines) */
+		if (tcph->res1 & TCP_FLAG_REDUNDANT) {
+			cur_stream->stream_method = REDUNDANT;
+		}
+		printf("RCVD, cur_stream->stream_method:%d", cur_stream->stream_method);
+		
 		TRACE_STATE("Stream %d: TCP_ST_SYN_RCVD\n", cur_stream->id);
 		AddtoControlList(mtcp, cur_stream, cur_ts);
 	} else {
@@ -760,7 +767,11 @@ Handle_TCP_ST_SYN_SENT (mtcp_manager_t mtcp, uint32_t cur_ts,
 			AddtoControlList(mtcp, cur_stream, cur_ts);
 			if (CONFIG.tcp_timeout > 0)
 				AddtoTimeoutList(mtcp, cur_stream);
-
+			
+			//lmhtq:connection test
+			printf("lmhtq:establised!\n");
+			printf("reserved bits: %d\n", tcph->res1);
+			//exit(0);
 		} else {
 			cur_stream->state = TCP_ST_SYN_RCVD;
 			TRACE_STATE("Stream %d: TCP_ST_SYN_RCVD\n", cur_stream->id);

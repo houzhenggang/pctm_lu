@@ -152,6 +152,11 @@ struct tcp_send_vars
 #endif
 };
 
+/* lmhtq: redundant */
+#define DEFAULT 0
+#define REDUNDANT 1
+#define TCP_FLAG_REDUNDANT 0x0001
+
 typedef struct tcp_stream
 {
 	socket_map_t socket;
@@ -190,6 +195,7 @@ typedef struct tcp_stream
 	
 	uint32_t last_active_ts;		/* ts_last_ack_sent or ts_last_ts_upd */
 
+	uint8_t stream_method; /* lmhtq: default or redundant */
 } tcp_stream;
 
 inline char *

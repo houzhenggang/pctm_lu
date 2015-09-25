@@ -62,6 +62,8 @@ static in_addr_t daddr;
 static in_port_t dport;
 static in_addr_t saddr;
 
+#define REDUNDANT 1
+
 int client()
 {
 	mctx_t mctx;
@@ -79,7 +81,7 @@ int client()
 	int s_len;
 	char s_buf[SNDBUF_SIZE+2];
 	
-	int sendi = 0, sendmax = 200;
+	int sendi = 0, sendmax = 2;
 	int core_nums;
 
 	printf("client start...\n");
@@ -119,8 +121,8 @@ int client()
 	addr.sin_addr.s_addr = daddr;
 	addr.sin_port = dport;
 
-	ret = mtcp_connect(mctx, sockid, 
-			(struct sockaddr *)&addr, sizeof(struct sockaddr_in));
+	ret = mtcp_connect_with_method(mctx, sockid, 
+			(struct sockaddr *)&addr, sizeof(struct sockaddr_in), 1);
 	if (ret < 0) {
 		perror("Failed to bind to the listening socket!\n");
 		mtcp_close(mctx, sockid);

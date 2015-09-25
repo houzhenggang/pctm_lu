@@ -160,6 +160,11 @@ SendTCPPacketStandalone(struct mtcp_manager *mtcp,
 
 	tcph->source = sport;
 	tcph->dest = dport;
+	/* lmhtq: redundat(4 lines) */
+	//if (cur_stream->stream_method == REDUNDANT) {
+	//	tcph->res1 |= TCP_FLAG_REDUNDANT;
+	//}
+	printf("alone reserved bits:%d\n", tcph->res1);
 
 	if (flags & TCP_FLAG_SYN)
 		tcph->syn = TRUE;
@@ -230,7 +235,12 @@ SendTCPPacket(struct mtcp_manager *mtcp, tcp_stream *cur_stream,
 
 	tcph->source = cur_stream->sport;
 	tcph->dest = cur_stream->dport;
-
+	/* lmhtq: redundat(1 line) */
+	if (cur_stream->stream_method == REDUNDANT) {
+		tcph->res1 |= TCP_FLAG_REDUNDANT;
+	}
+printf("reserved bits:%d\n", tcph->res1);
+printf("cur_stream->stream_method:%d\n", cur_stream->stream_method);
 	if (flags & TCP_FLAG_SYN) {
 		tcph->syn = TRUE;
 		if (cur_stream->snd_nxt != cur_stream->sndvar->iss) {
