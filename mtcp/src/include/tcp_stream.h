@@ -122,6 +122,14 @@ struct tcp_send_vars
 	uint8_t on_ackq;
 	uint8_t on_closeq;
 	uint8_t on_resetq;
+ 
+	uint8_t on_redundant_window_list;     /* lmhtq: for redundant */
+	uint8_t on_redundant_delay_list;      /* lmhtq: for redundant */
+	uint8_t on_redundant_windowq;         /* lmhtq: for redundant */
+	uint8_t on_redundant_delayq;          /* lmhtq: for redundant */
+	uint8_t red_cnt;                      /* lmhtq: for redundant */
+	uint32_t encoded_head;                /* lmhtq: for redundant */
+	uint16_t encoded_len;                 /* lmhtq: for redundant */
 
 	uint8_t on_closeq_int:1, 
 			on_resetq_int:1, 
@@ -131,6 +139,8 @@ struct tcp_send_vars
 	TAILQ_ENTRY(tcp_stream) control_link;
 	TAILQ_ENTRY(tcp_stream) send_link;
 	TAILQ_ENTRY(tcp_stream) ack_link;
+	TAILQ_ENTRY(tcp_stream) redundant_window_link;  /* lmhtq: for redundant */
+	TAILQ_ENTRY(tcp_stream) redundant_delay_link;   /* lmhtq: for redundant */
 
 	TAILQ_ENTRY(tcp_stream) timer_link;		/* timer link (rto list, tw list) */
 	TAILQ_ENTRY(tcp_stream) timeout_link;	/* connection timeout link */
@@ -152,10 +162,13 @@ struct tcp_send_vars
 #endif
 };
 
-/* lmhtq: redundant */
+/* lmhtq: redundant (5 lines) */
 #define DEFAULT 0
 #define REDUNDANT 1
 #define TCP_FLAG_REDUNDANT 0x0001
+#define TCP_FLAG_IS_REDUNDANT 0x0010
+#define TCP_FLAG_REDUNDANT_ACK 0x0100
+#define REDUNDNAT_MAX 16
 
 typedef struct tcp_stream
 {
@@ -195,7 +208,7 @@ typedef struct tcp_stream
 	
 	uint32_t last_active_ts;		/* ts_last_ack_sent or ts_last_ts_upd */
 
-	uint8_t stream_method; /* lmhtq: default or redundant */
+	uint8_t stream_method;          /* lmhtq: default or redundant */
 } tcp_stream;
 
 inline char *

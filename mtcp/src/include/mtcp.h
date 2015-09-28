@@ -165,10 +165,14 @@ struct mtcp_sender
 	TAILQ_HEAD (control_head, tcp_stream) control_list;
 	TAILQ_HEAD (send_head, tcp_stream) send_list;
 	TAILQ_HEAD (ack_head, tcp_stream) ack_list;
+	TAILQ_HEAD (redundant_window_head, tcp_stream) redundant_window_list;/* lmhtq: for redundant */
+	TAILQ_HEAD (redundant_delay_head, tcp_stream) redundant_delay_list;  /* lmhtq: for redundant */
 
 	int control_list_cnt;
 	int send_list_cnt;
 	int ack_list_cnt;
+	int redundant_window_list_cnt; /* lmhtq: for redundant */
+	int redundant_delay_list_cnt;  /* lmhtq: for redundant */
 };
 /*----------------------------------------------------------------------------*/
 struct mtcp_manager
@@ -209,6 +213,9 @@ struct mtcp_manager
 	stream_queue_t connectq;				/* streams need to connect */
 	stream_queue_t sendq;				/* streams need to send data */
 	stream_queue_t ackq;					/* streams need to send ack */
+
+	stream_queue_t redundant_windowq;   /* lmhtq: streams in time window for redundant */
+	stream_queue_t redundant_delayq;    /* lmhtq: streams need to send redundant packet */
 
 	stream_queue_t closeq;				/* streams need to close */
 	stream_queue_int *closeq_int;		/* internally maintained closeq */

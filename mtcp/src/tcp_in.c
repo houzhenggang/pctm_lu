@@ -690,9 +690,11 @@ Handle_TCP_ST_LISTEN (mtcp_manager_t mtcp, uint32_t cur_ts,
 		cur_stream->state = TCP_ST_SYN_RCVD;
 		cur_stream->rcv_nxt++;
 		
-		/* lmhtq: redundant (4 lines) */
+		/* lmhtq: redundant (6 lines) */
 		if (tcph->res1 & TCP_FLAG_REDUNDANT) {
 			cur_stream->stream_method = REDUNDANT;
+			cur_stream->sndvar->red_cnt = 0;
+			cur_stream->sndvar->encoded_len = 0;
 		}
 		printf("RCVD, cur_stream->stream_method:%d", cur_stream->stream_method);
 		

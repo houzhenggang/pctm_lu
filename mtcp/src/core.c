@@ -486,6 +486,7 @@ HandleApplicationCalls(mtcp_manager_t mtcp, uint32_t cur_ts)
 	int cnt, max_cnt;
 	int handled, delayed;
 	int control, send, ack;
+	int redundant_window, redundant_delay; /* lmhtq: for redundant */
 
 	/* connect handling */
 	while ((stream = StreamDequeue(mtcp->connectq))) {
@@ -503,10 +504,24 @@ HandleApplicationCalls(mtcp_manager_t mtcp, uint32_t cur_ts)
 		stream->sndvar->on_ackq = FALSE;
 		EnqueueACK(mtcp, stream, cur_ts, ACK_OPT_AGGREGATE);
 	}
+	
+	/* lmhtq: for redundant (4 lines), redundant_window queue handling */
+	//while ((stream = StreamDequeue(mtcp->redundant_windowq) ) ) {
+	//	stream->sndvar->on_redundant_windowq = FALSE;
+	//	AddtoRedundantWindowList(mtcp, stream);
+	//}
+
+	/* lmhtq: for redundant (4 lines), redundant_delay queue handling */
+	//while ((stream = StreamDequeue(mtcp->redundant_delayq) ) ) {
+	//	stream->sndvar->on_redundant_delayq = FALSE;
+	//	AddtoRedundantDelayList(mtcp, stream);
+	//}
+
 
 	/* close handling */
 	handled = delayed = 0;
 	control = send = ack = 0;
+	redundant_window = redundant_delay = 0; /* lmhtq: for redundant */
 	while ((stream = StreamDequeue(mtcp->closeq))) {
 		struct tcp_send_vars *sndvar = stream->sndvar;
 		sndvar->on_closeq = FALSE;
@@ -541,7 +556,18 @@ HandleApplicationCalls(mtcp_manager_t mtcp, uint32_t cur_ts)
 				send++;
 			if (sndvar->on_ack_list)
 				ack++;
+			/* lmhtq: for redundant(4 lines) */
+			if (sndvar->on_redundant_window_list)
+				redundant_window++;
+			if (sndvar->on_redundant_delay_list)
+				redundant_delay++;
 
+		/* lmhtq: for redundant. 
+		 * Here, add some constrains on
+		 * sndvar->on_redundant_window_list or
+		 * sndvar->on_redundant_delay_list
+		 * may be better.
+		 * */
 		} else if (sndvar->on_send_list || sndvar->on_ack_list) {
 			handled++;
 			if (stream->state == TCP_ST_ESTABLISHED) {
@@ -624,7 +650,7 @@ HandleApplicationCalls(mtcp_manager_t mtcp, uint32_t cur_ts)
 
 		} else {
 			if (stream->state != TCP_ST_CLOSED) {
-				stream->close_reason = TCP_ACTIVE_CLOSE;
+			 	stream->close_reason = TCP_ACTIVE_CLOSE;
 				stream->state = TCP_ST_CLOSED;
 				TRACE_STATE("Stream %d: TCP_ST_CLOSED\n", stream->id);
 				AddtoControlList(mtcp, stream, cur_ts);
@@ -639,7 +665,13 @@ HandleApplicationCalls(mtcp_manager_t mtcp, uint32_t cur_ts)
 	max_cnt = mtcp->resetq_int->count;
 	while (cnt++ < max_cnt) {
 		stream = StreamInternalDequeue(mtcp->resetq_int);
-		
+	
+		/* lmhtq: for redundant
+		 * Here, add some constrains on
+		 * sndvar->on_redundant_window_list or
+		 * sndvar->on_redundant_delay_list
+		 * may be better.
+		 * */
 		if (stream->sndvar->on_control_list || 
 				stream->sndvar->on_send_list || stream->sndvar->on_ack_list) {
 			/* wait until all the queues are flushed */
@@ -649,7 +681,7 @@ HandleApplicationCalls(mtcp_manager_t mtcp, uint32_t cur_ts)
 			stream->sndvar->on_resetq_int = FALSE;
 
 			if (stream->state != TCP_ST_CLOSED) {
-				stream->close_reason = TCP_ACTIVE_CLOSE;
+			 	stream->close_reason = TCP_ACTIVE_CLOSE;
 				stream->state = TCP_ST_CLOSED;
 				TRACE_STATE("Stream %d: TCP_ST_CLOSED\n", stream->id);
 				AddtoControlList(mtcp, stream, cur_ts);
@@ -682,6 +714,11 @@ WritePacketsToChunks(mtcp_manager_t mtcp, uint32_t cur_ts)
 		WriteTCPACKList(mtcp, mtcp->g_sender, cur_ts, thresh);
 	if (mtcp->g_sender->send_list_cnt)
 		WriteTCPDataList(mtcp, mtcp->g_sender, cur_ts, thresh);
+	/* lmhtq: for redundant (4 lines)*/
+	if (mtcp->g_sender->redundant_window_list_cnt)
+		WriteTCPRedundantWindowList(mtcp, mtcp->g_sender, cur_ts, thresh);
+	if (mtcp->g_sender->redundant_delay_list_cnt)
+		WriteTCPRedundantDelayList(mtcp, mtcp->g_sender, cur_ts, thresh);
 
 	for (i = 0; i < CONFIG.eths_num; i++) {
 		assert(mtcp->n_sender[i] != NULL);
@@ -691,6 +728,11 @@ WritePacketsToChunks(mtcp_manager_t mtcp, uint32_t cur_ts)
 			WriteTCPACKList(mtcp, mtcp->n_sender[i], cur_ts, thresh);
 		if (mtcp->n_sender[i]->send_list_cnt)
 			WriteTCPDataList(mtcp, mtcp->n_sender[i], cur_ts, thresh);
+		/* lmhtq: for redundant (4 lines)*/
+		if (mtcp->n_sender[i]->redundant_window_list_cnt)
+			WriteTCPRedundantWindowList(mtcp, mtcp->n_sender[i], cur_ts, thresh);
+		if (mtcp->n_sender[i]->redundant_delay_list_cnt)
+			WriteTCPRedundantDelayList(mtcp, mtcp->n_sender[i], cur_ts, thresh);
 	}
 }
 /*----------------------------------------------------------------------------*/
@@ -1022,10 +1064,14 @@ CreateMTCPSender(int ifidx)
 	TAILQ_INIT(&sender->control_list);
 	TAILQ_INIT(&sender->send_list);
 	TAILQ_INIT(&sender->ack_list);
+	TAILQ_INIT(&sender->redundant_window_list); /* lmhtq: for redundant */
+	TAILQ_INIT(&sender->redundant_delay_list);  /* lmhtq: for redundant */
 
 	sender->control_list_cnt = 0;
 	sender->send_list_cnt = 0;
 	sender->ack_list_cnt = 0;
+	sender->redundant_window_list_cnt = 0;      /* lmhtq: for redundant */
+	sender->redundant_delay_list_cnt = 0;       /* lmhtq: for redundant */
 
 	return sender;
 }
@@ -1161,6 +1207,17 @@ InitializeMTCPManager(struct mtcp_thread_context* ctx)
 		CTRACE_ERROR("Failed to create destroy queue.\n");
 		return NULL;
 	}
+	/* lmhtq: for redundant(10 lines) */
+	//mtcp->redundant_windowq = CreateStreamQueue(CONFIG.max_concurrency);
+	//if (!mtcp->redundant_windowq) {
+	//	CTRACE_ERROR("Failed to create redundant window queue.\n");
+	//	return NULL;
+	//}
+	//mtcp->redundant_delayq = CreateStreamQueue(CONFIG.max_concurrency);
+	//if (!mtcp->redundant_delayq) {
+	//	CTRACE_ERROR("Failed to create redundant delay queue.\n");
+	//	return NULL:
+	//}
 
 	mtcp->g_sender = CreateMTCPSender(-1);
 	if (!mtcp->g_sender) {

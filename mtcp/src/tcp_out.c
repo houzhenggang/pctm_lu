@@ -235,9 +235,11 @@ SendTCPPacket(struct mtcp_manager *mtcp, tcp_stream *cur_stream,
 
 	tcph->source = cur_stream->sport;
 	tcph->dest = cur_stream->dport;
-	/* lmhtq: redundat(1 line) */
+	/* lmhtq: redundant (5 lines) */
 	if (cur_stream->stream_method == REDUNDANT) {
 		tcph->res1 |= TCP_FLAG_REDUNDANT;
+		cur_stream->sndvar->red_cnt = 0;
+		cur_stream->sndvar->encoded_len = 0;
 	}
 printf("reserved bits:%d\n", tcph->res1);
 printf("cur_stream->stream_method:%d\n", cur_stream->stream_method);
@@ -522,6 +524,74 @@ SendControlPacket(mtcp_manager_t mtcp, tcp_stream *cur_stream, uint32_t cur_ts)
 	return ret;
 }
 /*----------------------------------------------------------------------------*/
+/* lmhtq: for redundant */
+int SendTCPRedundantPacket(struct mtcp_manager_t mtcp, tcp_stream *cur_stream,
+		uint32_t cur_ts, uint8_flags, uint8_t *palyload, uint16_t payloadlen)
+{
+	struct tcphdr *tcph;
+	uint16_t optlen;
+	uint8_t wscale = 0;
+	uint32_t window32 = 0;
+	uint16_t encoded_len;
+	uint32_t encoded_head;
+
+	optlen = CalculateOptionLength(flags);
+	if (payloadlen > cur_stream->sndvar->mss + optlen) {
+		TRACE_ERROR("Payload size exceeds MSS\n");
+		return ERROR;
+	}
+
+	tcph = (struct tcphdr *)IPOutput(mtcp, cur_stream,
+			TCP_HEADER_LEN + optlen + payloadlen);
+	if (tcph == NULL) {
+		return -2;
+	}
+	memset(tcph, 0, TCP_HEADER_LEN + optlen);
+
+	tcph->source = cur_stream->sport;
+	tcph->dest = cur_stream->dport;
+
+	if (cur_stream->stream_method == REDUNDANT) {
+		tcph->res1 |= TCP_FLAG_REDUNDANT;
+	}
+
+	/* lmhtq: tell the peer this pkt is a encoded pkt for recovery */
+	tcph->res1 |= TCP_FLAG_IS_REDUNDANT;
+	
+	window32 = cur_stream->rcvvar->rcv_wnd >> wscale;
+	tcph->window = htons(MIN((uint16_t)window32, TCP_MAX_WINDOW ));
+	/* if the advertised window is 0, wo need to advertise again later */
+	if (window32 == 0) {
+		cur_stream->need_wnd_adv = TRUE;
+	}
+
+	GenerateTCPOptions(cur_stream, cur_ts, flags,
+			(uint8_t *)tcph + TCP_HEADER_LEN, optlen);
+
+	tcph->doff = (TCP_HEADER_LEN +optlen) >> 2;
+	/* copy payload if exist */
+	if (payloadlen > 0) {
+		memcpy((uint8_t *)tcph +TCP_HEADER_LEN + optlen, payload, payloadlen );
+	}
+
+#if TCP_CALCULATE_CHECKSUM
+	tcph->check = TCPCalcChecksum((uint16_t *)tcph,
+			TCP_HEADER_LEN + optlen + payloadlen,
+			cur_stream->saddr, cur_stream->daddr);
+#endif
+
+	cur_stream->snd_nxt += palyloadlen;
+	
+	if (payloadlen > 0) {
+		if (cur_stream->state > TCP_ST_ESTABLISHED) {
+			TRACE_DBG("Stream: %u, send a redundant packet.\n",
+					cur_stream->id);
+		}
+	}
+
+	return payloadlen;
+}
+/*----------------------------------------------------------------------------*/
 inline int 
 WriteTCPControlList(mtcp_manager_t mtcp, 
 		struct mtcp_sender *sender, uint32_t cur_ts, int thresh)
@@ -774,6 +844,108 @@ WriteTCPACKList(mtcp_manager_t mtcp,
 	return cnt;
 }
 /*----------------------------------------------------------------------------*/
+/* lmhtq: for redundat */
+inline int
+WriteTCPRedundantWindowList(mtcp_manager_t mtcp,
+		struct mtcp_sender *sender, uint32_t cur_ts, int thresh)
+{
+	tcp_stream *cur_stream;
+	tcp_stream *next, *last;
+	int ret;
+	int to_send;
+	int cnt = 0;
+
+	/* loop */
+	cur_stream = TAILQ_FIRST(&sender->redundant_window_list);
+	last = TAILQ_LAST(&sender->redundant_window_list, redundant_window_head);
+	while (cur_stream) {
+		if (++cnt > thresh)
+			break;
+
+		TRACE_LOOP("Inside redundant window loop. cnt: %u, stream: %d\n",
+				cnt, cur_stream->id);
+		next = TAILQ_NEXT(cur_stream, sndvar->redundant_window_link);
+
+		TAILQ_REMOVE(&sender->redundant_window_list, cur_stream, 
+				sndvar->redundant_window_link);
+		sender->redundant_window_cnt--;
+
+		if (cur_stream->sndvar->on_redundant_window_list) {
+			cur_stream->sndvar->on_redundant_window_list = FALSE;
+			//TRACE_DBG("Stream %u,: Sending redundant packet in time window\n",
+			//cur_stream->id);
+			ret = SendTCPRedundantPacket(mtcp, cur_stream, cur_ts);
+			if (ret < 0) {
+				TAILQ_INSERT_HEAD(&sender->redundant_window_list,
+						cur_stream. sndvar->redundant_window_link);
+				cur_stream->sndvar->on_redundant_window_list = TRUE;
+				sender->redundant_window_cnt++;
+				/* since there is no avalable write buffer, break */
+				break;
+			}
+		} else {
+			TRACE_ERROR("Stream %u: not on redundant list.\n", cur_stream->id);
+		}
+
+		if (cur_stream == last)
+			break;
+		cur_stream = next;
+	}
+
+	return cnt;
+}
+/*----------------------------------------------------------------------------*/
+/* lmhtq: for redundat */
+inline int
+WriteTCPRedundantDelayList(mtcp_manager_t mtcp,
+		struct mtcp_sender *sender, uint32_t cur_ts, int thresh)
+{
+	tcp_stream *cur_stream;
+	tcp_stream *next, *last;
+	int ret;
+	int to_send;
+	int cnt = 0;
+
+	/* loop */
+	cur_stream = TAILQ_FIRST(&sender->redundant_delay_list);
+	last = TAILQ_LAST(&sender->redundant_delay_list, redundant_delay_head);
+	while (cur_stream) {
+		if (++cnt > thresh)
+			break;
+
+		TRACE_LOOP("Inside redundant delay loop. cnt: %u, stream: %d\n",
+				cnt, cur_stream->id);
+		next = TAILQ_NEXT(cur_stream, sndvar->redundant_delay_link);
+
+		TAILQ_REMOVE(&sender->redundant_delay_list, cur_stream, 
+				sndvar->redundant_delay_link);
+		sender->redundant_delay_cnt--;
+
+		if (cur_stream->sndvar->on_redundant_delay_list) {
+			cur_stream->sndvar->on_redundant_delay_list = FALSE;
+			//TRACE_DBG("Stream %u,: Sending redundant packet in time delay\n",
+			//cur_stream->id);
+			ret = SendTCPRedundantPacket(mtcp, cur_stream, cur_ts);
+			if (ret < 0) {
+				TAILQ_INSERT_HEAD(&sender->redundant_delay_list,
+						cur_stream. sndvar->redundant_delay_link);
+				cur_stream->sndvar->on_redundant_delay_list = TRUE;
+				sender->redundant_delay_cnt++;
+				/* since there is no avalable write buffer, break */
+				break;
+			}
+		} else {
+			TRACE_ERROR("Stream %u: not on redundant list.\n", cur_stream->id);
+		}
+
+		if (cur_stream == last)
+			break;
+		cur_stream = next;
+	}
+
+	return cnt;
+}
+/*----------------------------------------------------------------------------*/
 inline struct mtcp_sender *
 GetSender(mtcp_manager_t mtcp, tcp_stream *cur_stream)
 {
@@ -852,6 +1024,34 @@ AddtoACKList(mtcp_manager_t mtcp, tcp_stream *cur_stream)
 		cur_stream->sndvar->on_ack_list = TRUE;
 		TAILQ_INSERT_TAIL(&sender->ack_list, cur_stream, sndvar->ack_link);
 		sender->ack_list_cnt++;
+	}
+}
+/*----------------------------------------------------------------------------*/
+/* lmhtq: for redundat (12 lines) */
+inline void
+AddtoRedundantWindowList(mtcp_manager_t mtcp, tcp_stream *cur_stream, uint32_t cur_ts)
+{
+	struct mtcp_sender *sender = GetSender(mtcp, cur_stream);
+	assert(sender != NULL);
+	
+	if (!cur_stream->sndvar->on_redundant_window_list) {
+		cur_stream->sndvar->on_redundant_window_list = TRUE;
+		TAILQ_INSERT_TAIL(&sender->redundant_window_list);
+		sender->redundant_window_cnt++;
+	}
+}
+/*----------------------------------------------------------------------------*/
+/* lmhtq: for redundant (12 lines) */
+inline void
+AddtoRedundantDelayList(mtcp_manager_t mtcp, tcp_stream *cur_stream, uint32_t cur_ts)
+{
+	struct mtcp_sender *sender = GetSender(mtcp, cur_stream);
+	assert(sender != NULL);
+
+	if (!cur_stream->sndvar->on_redundant_delay_list) {
+		cur_stream->sndvar->on_redundant_delay_list = TRUE;
+		TAILQ_INSERT_TAIL(&sender->redundant_delay_list);
+		sender->redundant_delay_cnt++;
 	}
 }
 /*----------------------------------------------------------------------------*/
